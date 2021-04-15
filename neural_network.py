@@ -15,7 +15,7 @@ print(test_data.shape)
 print(test_label.shape)
 
 
-def generate_gaussian_weights(num_neurons, num_features):
+def generate_gaussian_weights(num_neurons, num_features, random_state = None):
     '''
     Generate weights taken from the Gaussian distribution, and based on the number of neurons within the hidden layer
     as well as the number of features of the dataset
@@ -23,18 +23,18 @@ def generate_gaussian_weights(num_neurons, num_features):
     Output is weights matrix of size (num_neurons, num_features)
     '''
     
-    weights = norm.rvs(size = [num_neurons, num_features], random_state=1)
+    weights = norm.rvs(size = [num_neurons, num_features], random_state=random_state)
     
     return weights
 
-def generate_gaussian_bias(num_neurons):
+def generate_gaussian_bias(num_neurons, random_state = None):
     '''
     Generate bias vector from the Gaussian distribution, and based on the number of neurons within the hidden layer
     
     Output is bias vector of size (num_neurons)
     '''
     
-    bias = norm.rvs(size = num_neurons, random_state=1)
+    bias = norm.rvs(size = num_neurons, random_state=random_state)
     
     return bias
 
@@ -124,7 +124,7 @@ def calc_delta_hidden(l_plus_one_delta, l_plus_one_weights, layer_output):
     
     delta = (weights for next layer . delta for next layer) .* (activation_func output for this layer .* (1 - activation_func output for this layer))
     '''
-    
+
     first_part = (l_plus_one_weights.T).dot(l_plus_one_delta)
     second_part = np.multiply(layer_output, np.ones(layer_output.size) - layer_output)
     return  np.multiply(first_part, second_part)
@@ -133,13 +133,16 @@ def calc_delta_hidden(l_plus_one_delta, l_plus_one_weights, layer_output):
 # Neural Network Setup
 
 # Static variables
-HIDDEN_LAYERS: int = 3
-HIDDEN_LAYERS_ACTIVATION_FUNC: list = ['relu', 'relu', 'relu']
-NUM_NEURONS: list = [5,3,6] # this should be a list containing int per hidden layer
+HIDDEN_LAYERS: int = 2
+HIDDEN_LAYERS_ACTIVATION_FUNC: list = ['relu', 'relu']
+NUM_NEURONS: list = [5,7] # this should be a list containing int per hidden layer
+
+if not (HIDDEN_LAYERS == len(HIDDEN_LAYERS_ACTIVATION_FUNC) == len(NUM_NEURONS)):
+    raise Exception("The num of layers must have the appropriate num of activation funcs and num of neurons specified")
     
-BATCH_SIZE: int = 20
+BATCH_SIZE: int = 1000
 LEARNING_RATE: float = 0.001
-NUM_EPOCHS: int = 50
+NUM_EPOCHS: int = 2000
 
     
 # Initialisation
@@ -182,8 +185,16 @@ weight_matrix = np.array(weight_matrix, dtype=object)
 
 
 ### Getting the network running
+
+observation_idx_current: int = 0 # basically keeps a tally of where we are up to in the dataset - used for batches
+ready_for_exit: bool = False
+
 for epoch_num in range(NUM_EPOCHS):
     batch_loss = []
+
+    if (observation_idx_current + BATCH_SIZE) > train_data.shape[0]:
+        BATCH_SIZE = train_data.shape[0] - observation_idx_current
+        ready_for_exit = True # because there is no more observations for next epoch
 
     # feedforward part
     # for the two variables below, the expected final state is numpy_array(representing each layer)
@@ -197,7 +208,7 @@ for epoch_num in range(NUM_EPOCHS):
         for layer_num, layer in enumerate(range(HIDDEN_LAYERS)):
 
             if layer_num == 0:
-                input_data = train_data[observation_idx]
+                input_data = train_data[observation_idx_current + observation_idx]
             else:
                 # extract the output of the previous layer
                 input_data = layer_output[observation_idx][layer_num - 1]
@@ -215,11 +226,10 @@ for epoch_num in range(NUM_EPOCHS):
         layer_output[observation_idx].append(a)
 
         # Calculate the error
-        loss = calculate_MSE(layer_output[observation_idx][-1], encoded_label_vector[observation_idx]) 
+        loss = calculate_MSE(layer_output[observation_idx][-1], encoded_label_vector[observation_idx_current + observation_idx]) 
         batch_loss.append(loss)
 
     epoch_loss.append(np.average(batch_loss))
-    print(epoch_loss)
 
     # Perform the backpropagation
     # instantiate the delta list obj for HIDDEN_LAYERS + output layer
@@ -252,3 +262,11 @@ for epoch_num in range(NUM_EPOCHS):
     # Time to update our weights, using the averaged delta from previous calc
     update = np.array(LEARNING_RATE * avg_d)
     weight_matrix = np.subtract(weight_matrix, update)
+
+    observation_idx_current += BATCH_SIZE
+
+    if ready_for_exit:
+        print("Exiting early due to no more observations to feed in")
+        break
+
+print(epoch_loss)
