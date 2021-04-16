@@ -33,6 +33,12 @@ class Activation(object):
         return np.maximum(0,x)
     def __relu_deriv(self,a):
         return np.heaviside(a, 0)
+
+    def __softmax(self, x):
+        z = z - np.max(z) # we're adding this such that it doesn't overflow with very large nums
+        return np.divide(np.exp(z), np.sum(np.exp(z)))
+    def __softmax_deriv(self, a):
+        return
     
     def __init__(self,activation: str = 'tanh'):
         if activation == 'logistic':
@@ -44,6 +50,9 @@ class Activation(object):
         elif activation == 'relu':
             self.f = self.__relu
             self.f_deriv = self.__relu_deriv
+        elif activation == 'softmax':
+            self.f = self.__softmax
+            self.f_deriv = self.__softmax_deriv
 
 
 class HiddenLayer(object):
@@ -277,12 +286,34 @@ class MLP:
         return output
 
 
+class Preprocessing:
+    '''
+    Class used to hold the data and any pre-processing that may occur
+    '''
+
+    def __init__(self, X, y):
+        self.X = X
+        self.y = y
+
+    def shuffle(self):
+        # create an index vector with the size of X
+        shuffled_idx = np.arange(self.X.shape[0])
+        np.random.shuffle(shuffled_idx)
+        self.X = self.X[shuffled_idx]
+        self.y = self.y[shuffled_idx]
+
 
 # Testing out the NN
+# Random seed important for evaluating model performance - ensure it's consistent
 np.random.seed(101)
 
-nn = MLP([2,3,1], [None,'logistic','tanh'], 'Xavier', 25)
 input_data = dataset[:,0:2]
 output_data = dataset[:,2]
-MSE = nn.fit(input_data, output_data, learning_rate=0.01, epochs=500)
+
+# Setting up preprocessing
+data = Preprocessing(input_data, output_data)
+data.shuffle()
+
+nn = MLP([2,3,1], [None,'logistic','tanh'], 'Xavier', 25)
+MSE = nn.fit(data.X, data.y, learning_rate=0.01, epochs=500)
 print(f'Loss values are {MSE}')
