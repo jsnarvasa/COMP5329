@@ -2,15 +2,15 @@
 import numpy as np
 import matplotlib.pyplot as pl
 
-'''
+
 # Read data
 train_data = np.load("./Assignment1-Dataset/train_data.npy")
 train_label = np.load("./Assignment1-Dataset/train_label.npy")
 test_data = np.load("./Assignment1-Dataset/test_data.npy")
 test_label = np.load("./Assignment1-Dataset/test_label.npy")
+
+
 '''
-
-
 # Generate dataset
 class_1 = np.hstack([np.random.normal( 1, 1, size=(25, 2)),  np.ones(shape=(25, 1))])
 class_2 = np.hstack([np.random.normal(-1, 1, size=(25, 2)), -np.ones(shape=(25, 1))])
@@ -18,7 +18,7 @@ dataset = np.vstack([class_1, class_2])
 
 train_data = dataset[:,0:2]
 train_label = dataset[:,2]
-
+'''
 
 
 ##DROPOUT FUNCTIONS
@@ -63,7 +63,7 @@ class Activation(object):
         return np.maximum(0,z)
   
     def __relu_deriv(self,a):
-        return np.heaviside(a, 1)
+        return np.heaviside(a, 0)
 
     def __softmax(self, z):
         # return np.exp(z) / np.sum(np.exp(z))
@@ -109,7 +109,8 @@ class HiddenLayer(object):
                  last_hidden_layer = False):
 
         self.last_hidden_layer = last_hidden_layer
-        self.input = None
+        self.output = []
+        self.input = []
         self.activation = Activation(activation).f
 
         #Derivative of last layer activation
@@ -163,16 +164,17 @@ class HiddenLayer(object):
         '''
 
         lin_output = np.dot(input, self.W) + self.b #simple perceptron output
-        self.output = (
+        self.output.append(
             lin_output if self.activation is None #linear if no activation specified
             else self.activation(lin_output) #activation fn on w*I + b  (i.e. activation function on linear output)
         ) 
-        # temporary disable
-        if not self.last_hidden_layer:
-            self.output,self.binomial_array = dropout_frwd(self.output, drop_prob)
+        
+        #if not self.last_hidden_layer:
+        #    output, self.binomial_array = dropout_frwd(self.output[-1], drop_prob)
+        #    self.output[-1] = output
 
-        self.input = input
-        return self.output
+        self.input.append(input)
+        return self.output[-1]
 
     #backpropagation
     def backward(self, delta, observation_idx, output_layer = False):
@@ -180,14 +182,13 @@ class HiddenLayer(object):
         Backpropagation for the neural network
         '''
 
-        self.grad_W[observation_idx] = np.atleast_2d(self.input).T.dot(np.atleast_2d(delta))
+        self.grad_W[observation_idx] = np.atleast_2d(self.input[observation_idx]).T.dot(np.atleast_2d(delta))
         self.grad_b[observation_idx] = delta
 
         if self.activation_deriv:
-            delta = delta.dot(self.W.T) * self.activation_deriv(self.input)
+            delta = delta.dot(self.W.T) * self.activation_deriv(self.input[observation_idx])
 
-        # Temporary disable
-        delta=dropout_backpass(delta, self.binomial_array)
+        #delta=dropout_backpass(delta, self.binomial_array)
 
         return delta
 
@@ -201,15 +202,17 @@ class MLP:
                  layers: list,
                  activation: list = [None, 'relu', 'relu'],
                  weight_init_method: str='Xavier', 
-                 batch_size: int = 1):
-        
-        self.batch_size = batch_size
+                 batch_size: int = 1,
+                 gd_mode: str = 'batch'):
         
         # Initialise the layers
         self.layers = []
         self.params = []
         
         self.activation = activation
+        self.gd_mode = gd_mode
+
+        self.batch_size = batch_size
         
         for i in range(len(layers)-1):
 
@@ -299,8 +302,12 @@ class MLP:
             # Shuffle the data, to ensure that each epoch will have different sequence of observations
             X, y = Utils.shuffle(X, y)
 
-            # Get the number of batches that we'll have given our dataset size and size of each batch
-            num_batches = int(np.ceil(X.shape[0] / self.batch_size))
+            if self.gd_mode == 'SGD':
+                # since there will be 1 batch, of X.shape[0] observation per epoch in SGD
+                num_batches = 1
+            else:
+                # Get the number of batches that we'll have given our dataset size and size of each batch
+                num_batches = int(np.ceil(X.shape[0] / self.batch_size))
 
             # replacing the loss variable below, since the size should be based on the number of epochs and not the size of our data
             # loss = np.zeros(X.shape[0]) #initialise as zeros with same length as input
@@ -311,6 +318,7 @@ class MLP:
 
             observation_idx_current: int = 0
 
+
             # Iterate over each batch
             for batch in range(num_batches):
 
@@ -318,11 +326,16 @@ class MLP:
 
                 for observation_idx in range(batch_size):
 
-                    # forward pass
-                    y_hat = self.forward(X[observation_idx_current + observation_idx])
-                    
-                    # backward pass
-                    obs_loss[observation_idx],delta=self.CE_loss(y[observation_idx_current + observation_idx],y_hat)
+                    if self.gd_mode == 'SGD':
+                        observation_idx_current = np.random.randint(X.shape[0])
+                        y_hat = self.forward(X[observation_idx_current])
+                        obs_loss[observation_idx],delta=self.CE_loss(y[observation_idx_current],y_hat)
+
+                    else:
+                        # forward pass
+                        y_hat = self.forward(X[observation_idx_current + observation_idx])                    
+                        # backward pass
+                        obs_loss[observation_idx],delta=self.CE_loss(y[observation_idx_current + observation_idx],y_hat)
 
                     self.backward(delta, observation_idx)
 
@@ -334,7 +347,7 @@ class MLP:
                 # Getting the average of the observation loss within the batch
                 batch_loss[batch] = np.mean(obs_loss)
 
-                if (observation_idx_current + batch_size) > X.shape[0]:
+                if ((observation_idx_current + batch_size) > X.shape[0]) and not (self.gd_mode == 'SGD'):
                     # then we reduce the size of the variable batch_size, so we don't reach end of index in the last batch iteration
                     batch_size = X.shape[0] - observation_idx_current
 
@@ -417,6 +430,17 @@ print(train_df.X.shape)
 # One-hot encode labels
 train_df.label_encode()
 
-nn = MLP([2, 5, 5, 2], [None, 'relu', 'relu', 'softmax'], weight_init_method='Xavier', batch_size=20)
-trial1 = nn.fit(train_df.X, train_df.y, learning_rate = 0.0001, epochs = 5, SGD_optim = {'Type': 'Momentum', 'Parameter': 0.9})
+# Batch mode
+# nn = MLP([2, 10, 15, 12, 2], [None, 'relu', 'relu', 'relu', 'softmax'], weight_init_method='Xavier', batch_size=25)
+
+# SGD mode
+nn = MLP([128, 10, 15, 12, 10], [None, 'relu', 'relu', 'relu', 'softmax'], weight_init_method='Xavier', batch_size=50, gd_mode='SGD')
+trial1 = nn.fit(train_df.X, train_df.y, learning_rate = 0.005, epochs = 700, SGD_optim = {'Type': 'Momentum', 'Parameter': 0.5})
 print(trial1)
+
+test_df = Preprocessing(test_data, test_label)
+test_df.normalize()
+
+predictions = nn.predict(test_df.X)
+
+print(predictions)
