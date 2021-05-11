@@ -1,48 +1,46 @@
-#Import relevant libraries
+# Import relevant libraries
 import numpy as np
 import matplotlib.pyplot as plt
 
 
-#Read data
+
+# Read data
 train_data = np.load("./Assignment1-Dataset/train_data.npy")
 train_label = np.load("./Assignment1-Dataset/train_label.npy")
 test_data = np.load("./Assignment1-Dataset/test_data.npy")
 test_label = np.load("./Assignment1-Dataset/test_label.npy")
 
+# Check shape
+print(train_data.shape)
+print(train_label.shape)
+print(test_data.shape)
+print(test_label.shape)
+
 '''
-# Generate dummy dataset
-class_1 = np.hstack([np.random.normal(3, 1, size = (100, 3)), np.full((100, 1), 1)])
-class_2 = np.hstack([np.random.normal(0, 1, size = (100, 3)), np.full((100, 1), 2)])
-class_3 = np.hstack([np.random.normal(-3, 1, size = (100, 3)), np.full((100, 1), 3)])
-dataset = np.vstack([class_1, class_2, class_3])
-train_data = dataset[0:75,0:3]
-train_label = dataset[0:75,3]
-test_data = dataset[75:,0:3]
-test_label = dataset[75:,3]
+# Hyperparameters
+LAYER_NEURONS = [128, 64, 10]
+LAYER_ACTIVATION_FUNCS = [None, 'relu', 'softmax']
+LEARNING_RATE = 0.01
+EPOCHS = 30
+DROPOUT_PROB = 0.5 # the probability of neuron dropping out
+SGD_OPTIM = None
+BATCH_SIZE = 1
 '''
 
-#Check shape
-#print(train_data.shape)
-#print(train_label.shape)
-#print(test_data.shape)
-#print(test_label.shape)
-
-
-def normalize(X, new_min=0, new_max=1):
-  #Min-Max Normalization- (x-xmin)/(xmax-xmin)
-  norm_data = (X - np.min(X))/(np.max(X) - np.min(X))
-  X = norm_data
-  return X
-train_data=normalize(train_data)
-
-
-#Create Activation Class
+# Hyperparameters
+LAYER_NEURONS = [128, 100, 50, 35, 10]
+LAYER_ACTIVATION_FUNCS = [None, 'relu', 'relu', 'relu', 'softmax']
+LEARNING_RATE = 0.005
+EPOCHS = 10
+DROPOUT_PROB = 0.5 # the probability of neuron dropping out
+SGD_OPTIM = None# {'Type': 'Momentum', 'Parameter': 0.5}
+BATCH_SIZE = 10000
 
 class Activation(object):
     
     def __tanh(self, x):
         return np.tanh(x)
-    
+
     def __tanh_deriv(self, a):
         #where a = np.tanh(x)
         return 1.0 - a**2
@@ -61,23 +59,16 @@ class Activation(object):
         return np.heaviside(a, 0)
 
     def __softmax(self, z):
-      # return np.exp(z) / np.sum(np.exp(z))
-        z = z - np.max(z) # we're adding this such that it doesn't overflow with very large nums - numerical stability
-        return np.divide(np.exp(z), np.sum(np.exp(z)))
+        z = np.atleast_2d(z)
+        max_z = np.max(z, axis=1)
+        z = [z[i] - max_z[i] for i in range(max_z.shape[0])] # we're adding this such that it doesn't overflow with very large nums - numerical stability
+        z = np.array(z)
+        return np.divide(np.exp(z).T, np.sum(np.exp(z), axis=1)).T
 
-    def __softmax_deriv(self, a, b):
-        #return a * (1 - a)
-        deriv = []
-        for i in range(len(a)):
-            for j in range(len(b)):
-                if i == j:
-                    deriv[i] = a[i] * (1-a[i])
-                else:
-                    deriv[i] = -a[i]*a[j]
-        return deriv
+    def __softmax_deriv(self, y, y_hat):
+        return y_hat - y
 
 
-        
     #Initialise & set the default activation functions
     def __init__(self, activation = 'relu'):
         if activation == "logistic":
@@ -94,19 +85,6 @@ class Activation(object):
             self.f_deriv = self.__softmax_deriv
 
 
-drop_prob=0.5
-def dropout(X, p_dropout):
-    u = np.random.binomial(1, p_dropout, size=X.shape)# / p_dropout
-    out = X * u
-    binomial_array=u
-    return out, binomial_array
-def dropout_backward(delta, binomial_array, layer_num):
-    delta*=nn.layers[layer_num - 1].binomial_array
-    return delta
-
-
-#Create Hidden Layer Class
-
 class HiddenLayer(object):
     def __init__(self, 
                  n_in, 
@@ -122,11 +100,8 @@ class HiddenLayer(object):
         self.last_hidden_layer = last_hidden_layer
         self.input = None
         self.activation = Activation(activation).f
-    
-        #Derivative of last layer activation
-        #Note methods/links to Activation class
-    
         self.activation_deriv = None
+
         if activation_last_layer:
             self.activation_deriv = Activation(activation_last_layer).f_deriv
 
@@ -147,14 +122,23 @@ class HiddenLayer(object):
         #Initialise velocities for Momentum SGD
         self.v_W = np.zeros_like(self.grad_W)
         self.v_b = np.zeros_like(self.grad_b)
-
-        
-          #size of bias = size of output
-        
-    
-          #size of weight gradient = size of weight
         
         self.binomial_array=np.zeros(n_out)
+
+
+    @staticmethod
+    def dropout_forward(X, p_dropout):
+        u = np.random.binomial(1, 1 - p_dropout, size=X.shape) # / p_dropout
+        out = X * u
+        binomial_array=u
+        return out, binomial_array
+
+    
+    @staticmethod
+    def dropout_backward(delta, binomial_array, layer_num):
+        delta*=nn.layers[layer_num - 1].binomial_array
+        return delta
+    
     #forward progress for training epoch:
     def forward(self, input):
         lin_output = np.dot(input, self.W) + self.b #simple perceptron output
@@ -164,7 +148,7 @@ class HiddenLayer(object):
         ) 
 
         if not self.last_hidden_layer:
-            self.output, self.binomial_array = dropout(self.output, drop_prob)
+            self.output, self.binomial_array = self.dropout_forward(self.output, DROPOUT_PROB)
 
         self.input = input
         return self.output
@@ -172,15 +156,13 @@ class HiddenLayer(object):
     #backpropagation
     def backward(self, delta, layer_num, output_layer = False):
         self.grad_W = np.atleast_2d(self.input).T.dot(np.atleast_2d(delta))
-        self.grad_b = delta
-        if self.activation == 'softmax':
-            delta = delta.dot(self.W.T) * self.activation_deriv(self.input, self.output)
+        self.grad_b = np.average(delta, axis=0)
 
         if self.activation_deriv:
-            #print(delta.shape, self.W.T.shape,self.activation_deriv(self.input).shape)
             delta = delta.dot(self.W.T) * self.activation_deriv(self.input)
+
         if layer_num != 0:
-            delta=dropout_backward(delta, self.binomial_array, layer_num)
+            delta=self.dropout_backward(delta, self.binomial_array, layer_num)
         return delta
 
 
@@ -207,8 +189,7 @@ class MLP:
                                            last_hidden_layer=last_hidden_layer))
 
             
-            #note HiddenLayer(n_in, n_out, activation_last_layer, activation) - type(layers) = int
-        #Forward - pass info through layer, return result of final output
+    #Forward - pass info through layer, return result of final output
     def forward(self, input):
         for layer in self.layers: #iterate forward through layers
             output = layer.forward(input) #call forward method from HiddenLayer
@@ -228,14 +209,11 @@ class MLP:
         return loss, delta
 
     def CE_loss(self, y, y_hat):
-      #print(y, np.sum(y_hat))
-      softmax_y = Activation('softmax').f(y)
-      softmax_y_hat = Activation('softmax').f(y_hat)
-      loss = -np.sum(softmax_y * np.log(softmax_y_hat)) 
-      loss=loss*0.98
-      delta = softmax_y - softmax_y_hat
-      #print(loss)
-      return loss, delta
+        loss = - np.nansum(y * np.log(y_hat))
+        loss = loss / y.shape[0] # Averaging it out
+        #loss=loss*0.98
+        delta = Activation(self.activation[-1]).f_deriv(y, y_hat)
+        return loss, delta
 
     def backward(self, delta):
         delta = self.layers[-1].backward(delta, len(self.layers) -1, output_layer = True)
@@ -247,24 +225,20 @@ class MLP:
       if SGD_optim is None:
           for layer in self.layers:
                 # Obtaining the averages
-              grad_W_avg = np.average(layer.grad_W, axis=0)
-              grad_b_avg = np.average(layer.grad_b, axis=0)
               layer.W -= lr * layer.grad_W
               layer.b -= lr * layer.grad_b
 
         # Need to make this compatible with batches
       elif SGD_optim['Type'] == 'Momentum':
           for layer in self.layers:
-              grad_W_avg = np.average(layer.grad_W, axis=0)
-              grad_b_avg = np.average(layer.grad_b, axis=0)
-              layer.v_W = (SGD_optim['Parameter'] * layer.v_W) + (lr * grad_W_avg)
-              layer.v_b = (SGD_optim['Parameter'] * layer.v_b) + (lr * grad_b_avg)
+              layer.v_W = (SGD_optim['Parameter'] * layer.v_W) + (lr * layer.grad_W)
+              layer.v_b = (SGD_optim['Parameter'] * layer.v_b) + (lr * layer.grad_b)
               layer.W = layer.W - layer.v_W
               layer.b = layer.b - layer.v_b
               
 
     #fit/training function - returns all losses within whole training process
-    def fit(self, X, y, learning_rate = 0.1, epochs = 100, SGD_optim = None):
+    def fit(self, X, y, learning_rate = 0.1, epochs = 100, SGD_optim = None, batch_size = 1):
         #X = input data/features
         #y = input target
         #learning rate = param for speed of learning
@@ -272,32 +246,58 @@ class MLP:
             
         X = np.array(X)
         y = np.array(y)
-        to_return = np.zeros(epochs)
+        to_return = []
+
+        num_batches = int(np.ceil(X.shape[0] / batch_size))
             
         for k in range(epochs):
             if k % 5 == 0:
-              print("training epoch", k)
-            loss = np.zeros(X.shape[0]) #initialise as zeros with same length as input
-            for it in range(X.shape[0]):
-                i = np.random.randint(X.shape[0])
+              print(f"Training epoch {k}")
+
+            loss = np.zeros(num_batches) # initialise to have the same length as number of batches within the epoch
+            accuracy = np.zeros(num_batches)
+
+            current_idx = 0
+
+            # Shuffle the data, to ensure that each epoch will have different sequence of observations
+            X, y = Utils.shuffle(X, y)
+
+            for batch_idx in range(num_batches):
+                
                 #forward pass 
-                y_hat = self.forward(X[i]) #note forward returns output of final layer
-                #print(y_hat)
+                y_hat = self.forward(X[current_idx : current_idx + batch_size, :]) #note forward returns output of final layer
 
                 #backward pass
-                #loss[it], delta = self.CE_loss(y[i], y_hat) #note criterion_MSE returns loss, delta
-                loss[it], delta = self.criterion_MSE(y[i], y_hat)
+                loss[batch_idx], delta = self.CE_loss(y[current_idx : current_idx + batch_size], y_hat)
+
                 self.backward(delta)
 
                 #update
                 self.update(learning_rate, SGD_optim)
-            to_return[k] = np.mean(loss)
 
-            print(to_return)
+                # update the mark of where we got up to, so the next batch can proceed
+                if (current_idx + batch_size) > X.shape[0]:
+                    batch_size = X.shape[0] - current_idx
+                current_idx += batch_size
+
+                # check accuracy
+                test_predict = self.predict(test_df.X)
+                train_predict = self.predict(train_df.X)
+                test_predict = test_df.decode(test_predict)
+                train_predict = train_df.decode(train_predict)
+                
+                '''
+                test_accuracy = np.sum(test_predict == test_label[:, 0]) / test_predict.shape[0]
+                train_accuracy = np.sum(train_predict == train_label[:, 0]) / train_predict.shape[0]
+                '''
+
+            to_return.append(np.mean(loss))
+
+            print(to_return[-5:])
          
         return to_return
             
-        #prediction function
+    #prediction function
     def predict(self, x):
         x = np.array(x)
         output = [i for i in range(x.shape[0])]
@@ -305,6 +305,7 @@ class MLP:
             output[i] = self.forward(x[i, :])
         output = np.array(output)
         return output
+
 
 class Preprocessing:
     '''
@@ -314,29 +315,48 @@ class Preprocessing:
     def __init__(self, X, y):
         self.X = X
         self.y = y
+        self.predictions = None
 
     def normalize(self, new_min=0, new_max=1):     
         #Min-Max Normalization- (x-xmin)/(xmax-xmin)
         norm_data = (self.X - np.min(self.X))/(np.max(self.X) - np.min(self.X))
         self.X = norm_data
 
-    def label_encode(self):
+    def standardize(self):
+        self.X = (self.X - np.mean(self.X)) / np.std(self.X)
+
+    @staticmethod
+    def label_encode(label_vector):
         '''
-        Encode the label vector of our dataset, such that we can use it for the computation of the MSE.
+        Encode the label vector of our dataset, such that we can use it for the computation of loss function.
         This is because the labels are labelled as integers 0 to 9, whereas for MSE to work, we need to
         create a array vector of size 10 for every single observation, where the value 1 is set on the index of the correct observation
         '''
         
-        num_classes = np.unique(self.y).size
+        num_classes = np.unique(label_vector).size
         
         encoded_label_vector = []
         
-        for label in self.y:
+        for label in label_vector:
             encoded_label = np.zeros(num_classes)
-            encoded_label[int(label)-1] = 1
+            encoded_label[int(label)] = 1
             encoded_label_vector.append(encoded_label)
         
-        self.y = np.array(encoded_label_vector)
+        return np.array(encoded_label_vector)
+
+    
+    @staticmethod
+    def decode(prediction_matrix):
+        '''
+        Takes in the matrix of our predictions, where each prediction is a numpy array of the output layer encoded
+        where the value of 1 is the class that it predicts is the right class
+        '''
+
+        decoded_predictions = np.zeros(prediction_matrix.shape[0])
+        for prediction_idx, prediction_vector in enumerate(prediction_matrix):
+            decoded_predictions[prediction_idx] = int(np.argmax(prediction_vector)) # we add the two index zeros because it's a nparray within a tuple
+        
+        return decoded_predictions
 
 
 class Utils:
@@ -355,37 +375,63 @@ class Utils:
         return X, y
 
 
+# Instantiating our data and pre-processing it as required
 train_df = Preprocessing(train_data, train_label)
-train_df.normalize()
-#train_df.label_encode()
-
 test_df = Preprocessing(test_data, test_label)
-test_df.normalize()
 
-#print(np.min(train_df.X))
-#print(np.max(train_df.X))
+# Normalise X matrix (features)
+#train_df.normalize()
+#test_df.normalize()
+train_df.standardize()
+test_df.standardize()
 
+# Perform one-hot encoding for our label vector (ONLY ON TRAIN)
+train_df.y = train_df.label_encode(train_df.y)
 
-nn = MLP([train_df.X.shape[1], 100, 50, 75, 1], [None, 'relu', 'relu', 'relu', 'relu'])
-trial1 = nn.fit(train_df.X, train_df.y, learning_rate = 0.001, epochs = 10, SGD_optim = None )#{'Type' : 'Momentum', 'Parameter': 0.9})
+# Instantiate the multi-layer neural network
+nn = MLP(LAYER_NEURONS, LAYER_ACTIVATION_FUNCS)
 
-predictions = nn.predict(test_df.X)
+# Perform fitting using the training dataset
+trial1 = nn.fit(train_df.X, train_df.y, learning_rate = LEARNING_RATE, epochs = EPOCHS, SGD_optim = SGD_OPTIM, batch_size=BATCH_SIZE )#{'Type' : 'Momentum', 'Parameter': 0.9})
 
-print(predictions)
+# Perform prediction of the test dataset
+test_df.predictions = nn.predict(test_df.X)
+train_df.predictions = nn.predict(train_df.X)
 
-def decode(prediction_matrix):
-    '''
-    Takes in the matrix of our predictions, where each prediction is a numpy array of the output layer encoded
-    where the value of 1 is the class that it predicts is the right class
-    '''
+test_df.predictions = test_df.decode(test_df.predictions)
+train_df.predictions = train_df.decode(train_df.predictions)
 
-    decoded_predictions = np.zeros(prediction_matrix.shape[0])
-    for prediction_idx, prediction_vector in enumerate(prediction_matrix):
-        decoded_predictions[prediction_idx] = int(np.where(prediction_vector == 1)[0][0]) # we add the two index zeros because it's a nparray within a tuple
-    
-    return decoded_predictions
+test_accuracy = np.sum(test_df.predictions == test_df.y[:, 0]) / test_df.predictions.shape[0]
+train_accuracy = np.sum(train_df.predictions == train_label[:, 0]) / train_df.predictions.shape[0]
+
+print(f'Train accuracy: {train_accuracy}')
+print(f'Test accuracy: {test_accuracy}')
+
+print(test_df.predictions)
+
+plt.plot(trial1)
 '''
-decoded_predictions = decode(predictions)
+confusion_mat = pd.DataFrame(0, index = np.unique(test_df.y) , columns = np.unique(test_df.y))
+for i in range(0, len(test_df.y)):
+  confusion_mat[int(test_df.y[i])].iloc[int(test_df.predictions[i])] += 1
 
-accuracy = np.sum(decoded_predictions == test_df.y[:, 0]) / decoded_predictions.shape[0]
-'''
+def confusion_mat_extracts(confusion_matrix, label):
+  TP = confusion_mat[label][label]
+  FN = np.array(confusion_mat[label].iloc[0:label].values.tolist() + confusion_mat[label].iloc[label+1:].values.tolist()).sum()
+  FP = np.array(confusion_mat.iloc[label][0:label].values.tolist() + confusion_mat.iloc[label][label + 1:].values.tolist()).sum()
+  TN = confusion_mat.sum().sum() - TP - FN - FP
+  return {'TP': TP, 'FN': FN, 'FP': FP, 'TN': TN}
+
+def confusion_mat_measures(confusion_matrix, label):
+  TP = confusion_mat_extracts(confusion_matrix, label)['TP']
+  FN = confusion_mat_extracts(confusion_matrix, label)['FN']
+  FP = confusion_mat_extracts(confusion_matrix, label)['FP']
+  TN = confusion_mat_extracts(confusion_matrix, label)['TN']
+
+  Precision = TP / (TP + FP)
+  Recall = TP / (TP + FN)
+  F1 = (2 * Precision * Recall) / (Precision + Recall)
+
+  return {'Precision': Precision, 'Recall': Recall, 'F1': F1}
+
+  '''
